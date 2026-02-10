@@ -1,3 +1,9 @@
+require 'tty-prompt'
+require 'json'
+
+require 'tty-prompt'
+require 'json'
+
 module Color
   RED = "\e[31m"
   GREEN = "\e[32m"
@@ -115,10 +121,28 @@ class Player
 end
 
 class Game
+  SAVE_FILE = "blackjack_data.json"
+
   def initialize
+    @prompt = TTY::Prompt.new
     @deck = Deck.new
-    @player = Player.new(1000)
+    @player = Player.new(load_wallet)
     @dealer_hand = Hand.new
+  end
+
+  def load_wallet
+    if File.exist?(SAVE_FILE)
+      data = JSON.parse(File.read(SAVE_FILE))
+      data["wallet"] || 1000
+    else
+      1000
+    end
+  rescue
+    1000 # Default if file is corrupted
+  end
+
+  def save_wallet
+    File.write(SAVE_FILE, JSON.generate({ "wallet" => @player.wallet }))
   end
 
   def clear_screen
@@ -157,20 +181,19 @@ class Game
       puts "\n#{Color::BOLD}#{Color::GREEN}Current Wallet: $#{@player.wallet}#{Color::RESET}"
       
       if @player.wallet <= 0
-        puts "\n#{Color::RED}You're out of money! Game Over.#{Color::RESET}"
-        break
+        puts "\n#{Color::RED}You're out of money! Resetting to $1000.#{Color::RESET}"
+        @player.wallet = 1000
+        save_wallet
+        sleep(2)
       end
 
-      print "\nHow much do you want to bet? (or (q)uit): "
-      input = gets.chomp
-      break if input.downcase == 'q'
-      
-      @current_bet = input.to_i
-      if @current_bet <= 0 || @current_bet > @player.wallet
-        puts "#{Color::RED}Invalid bet.#{Color::RESET}"
-        sleep(1)
-        next
+      @current_bet = @prompt.ask("\nHow much do you want to bet? (or 0 to quit):", default: 10) do |q|
+        q.validate ->(input) { input.to_i >= 0 && input.to_i <= @player.wallet }
+        q.messages[:valid?] = "Invalid bet! Must be between 0 and #{@player.wallet}."
+        q.convert :int
       end
+
+      break if @current_bet == 0
 
       @player.place_bet(@current_bet)
 
@@ -197,11 +220,12 @@ class Game
         end
       end
 
-      print "\nPlay another round? (y/n): "
-      break if gets.chomp.downcase != 'y'
+      save_wallet
+      break unless @prompt.yes?("\nPlay another round?")
     end
 
     clear_screen
+    save_wallet
     puts "\nThanks for playing! Final wallet: #{Color::GREEN}#{Color::BOLD}$#{@player.wallet}#{Color::RESET}"
     draw_line
   end
@@ -210,14 +234,14 @@ class Game
 
   def player_turn
     while @player.hand.value < 21
-      print "\nDo you want to #{Color::BOLD}(h)it#{Color::RESET} or #{Color::BOLD}(s)tay#{Color::RESET}? "
-      input = gets.chomp.downcase
+      choices = { "Hit" => :hit, "Stay" => :stay }
+      action = @prompt.select("\nWhat would you like to do?", choices)
 
-      if input == "h"
+      if action == :hit
         @player.hand.add_card(@deck.deal)
         puts "Your hand:   #{@player.hand}"
         draw_line
-      elsif input == "s"
+      elsif action == :stay
         break
       end
     end
