@@ -126,23 +126,71 @@ class Game
   def initialize
     @prompt = TTY::Prompt.new
     @deck = Deck.new
-    @player = Player.new(load_wallet)
+    data = load_data
+    @player = Player.new(data[:wallet])
+    @high_score = data[:high_score]
     @dealer_hand = Hand.new
   end
 
-  def load_wallet
+  def load_data
     if File.exist?(SAVE_FILE)
       data = JSON.parse(File.read(SAVE_FILE))
-      data["wallet"] || 1000
+      { wallet: data["wallet"] || 1000, high_score: data["high_score"] || 0 }
     else
-      1000
+      {wallet: 1000, high_score: 0 }
     end
   rescue
-    1000 # Default if file is corrupted
+    { wallet: 1000, high_score: 0 } # Default if file is corrupted
   end
 
-  def save_wallet
-    File.write(SAVE_FILE, JSON.generate({ "wallet" => @player.wallet }))
+  def save_data
+    data =  {
+      "wallet"=> @player.wallet,
+      "high_score" => @high_score || 0
+    }
+    File.write(SAVE_FILE, JSON.generate(data))
+  end
+
+  def main_menu
+    loop do
+      clear_screen
+       draw_star
+      puts <<~'HEREDOC'
+          _ _ _ ____ _    ____ ____ _  _ ____    ___ ____
+          | | | |___ |    |    |  | |\/| |___     |  |  | 
+          |_|_| |___ |___ |___ |__| |  | |___     |  |__|
+
+              ,-,---. .              ,-_/                    
+               '|___/ |  ,-. ,-. . , '  | ,-. ,-. . ,        
+      -- -- -- ,|   \ |  ,-| |   |/     | ,-| |   |/ -- -- --
+              `-^---' `' `-^ `-' |\     | `-^ `-' |\         
+                                     `--'                    
+      HEREDOC
+      draw_star
+
+      choices = [
+        { name: "Start New Game", value: :new },
+        { name: "Load Previous Game", value: :load},
+        { name: "Show High Score", value: :high_score},
+        { name: "Quit", value: :quit}
+      ]
+
+      action = @prompt.select("\nWelcome to the Casino!", choices)
+
+      case action 
+      when :new
+        @player.wallet = 1000
+        save_data
+        play
+      when :load
+        play
+      when :high_score
+        puts "\n#{Color::YELLOW}Your High Score: $#{@high_score}#{Color::RESET}"
+        @prompt.keypress("Press any key to return to menu...")
+      when :quit
+        break
+      end
+    end
   end
 
   def clear_screen
@@ -183,7 +231,7 @@ class Game
       if @player.wallet <= 0
         puts "\n#{Color::RED}You're out of money! Resetting to $1000.#{Color::RESET}"
         @player.wallet = 1000
-        save_wallet
+        save_data
         sleep(2)
       end
 
@@ -220,12 +268,12 @@ class Game
         end
       end
 
-      save_wallet
+      save_data
       break unless @prompt.yes?("\nPlay another round?")
     end
 
     clear_screen
-    save_wallet
+    save_data
     puts "\nThanks for playing! Final wallet: #{Color::GREEN}#{Color::BOLD}$#{@player.wallet}#{Color::RESET}"
     draw_line
   end
@@ -285,8 +333,13 @@ class Game
       puts "\n#{Color::YELLOW}#{Color::BOLD}PUSH (TIE)#{Color::RESET}"
       @player.receive_winnings(@current_bet)
     end
+    if @player.wallet > @high_score
+      @high_score = @player.wallet
+      puts "#{Color::BOLD}New High Score!#{Color::RESET}"
+      save_data
+    end
     draw_line
   end
 end
 
-Game.new.play
+Game.new.main_menu
